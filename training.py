@@ -1,3 +1,4 @@
+import copy
 import time
 import numpy as np
 from torch import utils
@@ -7,11 +8,11 @@ import torch.optim as optim
 import torch.utils.data as data
 import torchvision
 from torchvision import transforms
-
+import matplotlib.pyplot as plt
 resize = 224
-num_epochs = 20
+num_epochs = 200
 
-path_save = '.\\trained_resnet50.pth'
+path_save = '.\\best_model.pth'
 path_data = '.\\dataset_rac\\'
 
 data_transforms = {
@@ -39,8 +40,7 @@ validation_loader = torch.utils.data.DataLoader(val_set, batch_size=16, shuffle=
 
 inputs, labels = next(iter(train_loader))
 dataloader_dict = {"train": train_loader, "val": validation_loader}
-# net = torchvision.models.vgg16(pretrained=True)
-# net.classifier[6] = nn.Linear(in_features=4096, out_features=6)
+
 
 net = torchvision.models.resnet50(pretrained=True)
 num_ftrs = net.fc.in_features
@@ -51,11 +51,14 @@ criterior = nn.CrossEntropyLoss()
 optimizer = optim.SGD(params=net.parameters(), lr=0.001)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+losses = {"train":[], "val":[]}
+acces = {"train":[], "val":[]}
 
 def train(model, dataloader_dict, criterion, optimizer, num_epochs):
     begin = time.time()
     best_acc =0.0
     model = model.to(device)
+    best_model_wts = copy.deepcopy(model.state_dict())
     for epoch in range(num_epochs):
         print("Epoch {}/{}".format(epoch, num_epochs))
         for phase in ['train', 'val']:
@@ -75,7 +78,6 @@ def train(model, dataloader_dict, criterion, optimizer, num_epochs):
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
                     _, preds = torch.max(outputs, 1)
-                    # print("pres: {}".format(preds))
                     loss = criterion(outputs, labels)
 
                     # backward + optimize only if in training phase
@@ -86,20 +88,46 @@ def train(model, dataloader_dict, criterion, optimizer, num_epochs):
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
+                running_corrects += torch.sum(preds == labels.data).detach().cpu()
 
             epoch_loss = running_loss / len(dataloader_dict[phase].dataset)
             epoch_acc = running_corrects.double() / len(dataloader_dict[phase].dataset)
+            
+            losses[phase].append(epoch_loss)
+            acces[phase].append(epoch_acc)
+
+            if phase == 'val' and epoch_acc > best_acc:
+                best_acc = epoch_acc
+                best_model_wts = copy.deepcopy(model.state_dict())
 
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(
                 phase, epoch_loss, epoch_acc))
-            if phase == 'val' and epoch_acc > best_acc:
-                best_acc = epoch_acc
+
     time_elapsed = time.time() - begin
     print('Training complete in {:.0f}m {:.0f}s'.format(
         time_elapsed // 60, time_elapsed % 60))
     print('Best val Acc: {:4f}'.format(best_acc))
-    torch.save(model.state_dict(), path_save)
+    torch.save(best_model_wts, path_save)
+
+
+def showplt():
+    plt.title("Training and Validation")
+
+    plt.plot(acces["train"],label="train_acc",color = 'r')
+    plt.plot(losses["train"],label="train_loss", color = 'g')
+
+    plt.plot(acces["val"],label="val_acc", color = 'b')
+    plt.plot(losses["val"],label="val_loss", color = 'm')
+
+    plt.xlabel("epoch")
+    plt.ylabel("values")
+    plt.legend()
+    plt.show()
+
+
 if __name__ == '__main__':
     train(net,dataloader_dict, criterior, optimizer, num_epochs)
+    showplt()
+
+
 
